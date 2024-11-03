@@ -51,7 +51,7 @@ int main() {
     int currentInputSize = currentInput.size();
     int currentInputSizeMinusOne = currentInputSize - 1;
     if (currentInput == "uci") {
-      std::cout << "id name ChandraChess 1.0" << std::endl;
+      std::cout << "id name ChandraChess 2.0" << std::endl;
       std::cout << "id author Aditya Chandra" << std::endl;
       std::cout << "option name Hash type spin default 64 min 1 max 2147" << std::endl;
       std::cout << "option name Clear Hash type button" << std::endl;
