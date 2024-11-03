@@ -11,8 +11,7 @@ uint64_t positionKeys[13][64];
 uint64_t castlingPermissionsKeys[16];
 uint64_t enPassantSquareKeys[64];
 void initializeKeys() {
-  std::random_device rd;
-  std::mt19937_64 gen(rd());
+  std::mt19937_64 gen(0);
   std::uniform_int_distribution<uint64_t> d(0ull, 0xffffffffffffffffull);
   sideToPlayKeys[0] = d(gen);
   sideToPlayKeys[1] = d(gen);
