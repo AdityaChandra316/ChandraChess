@@ -126,7 +126,7 @@ int main() {
         int movesOfOurSidePlayed = currentBoard.halfMovesDone / 2;
         double movesToGo = timeManagementTable[currentBoard.sideToPlay][movesOfOurSidePlayed];
         int movesToGoStart = currentInput.find("movestogo");
-        if (movesToGo != std::string::npos) {
+        if (movesToGoStart != std::string::npos) {
           movesToGoStart += 10;
           int movesToGoEnd = currentInput.find(' ', movesToGoStart + 1);
           if (movesToGoEnd == std::string::npos) movesToGoEnd = currentInputSize;
