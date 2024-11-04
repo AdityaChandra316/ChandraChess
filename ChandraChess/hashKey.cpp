@@ -11,10 +11,10 @@ uint64_t castlingPermissionsKeys[16];
 uint64_t enPassantSquareKeys[64];
 uint64_t x = 1ull;
 uint64_t xorshift64() {
-	x ^= x << 13;
-	x ^= x >> 7;
-	x ^= x << 17;
-	return x;
+  x ^= x << 13;
+  x ^= x >> 7;
+  x ^= x << 17;
+  return x;
 }
 void initializeKeys() {
   sideToPlayKeys[0] = xorshift64();
