@@ -10,8 +10,7 @@ uint64_t positionKeys[13][64];
 uint64_t castlingPermissionsKeys[16];
 uint64_t enPassantSquareKeys[64];
 uint64_t x = 1ull;
-uint64_t xorshift64()
-{
+uint64_t xorshift64() {
 	x ^= x << 13;
 	x ^= x >> 7;
 	x ^= x << 17;
