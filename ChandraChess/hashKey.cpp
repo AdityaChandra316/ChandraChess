@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <iostream>
 #include <math.h>
-#include <random>
 #include "bits.h"
 #include "hashKey.h"
 #include "state.h"
@@ -10,21 +9,27 @@ uint64_t sideToPlayKeys[2];
 uint64_t positionKeys[13][64];
 uint64_t castlingPermissionsKeys[16];
 uint64_t enPassantSquareKeys[64];
+uint64_t x = 1ull;
+uint64_t xorshift64()
+{
+	x ^= x << 13;
+	x ^= x >> 7;
+	x ^= x << 17;
+	return x;
+}
 void initializeKeys() {
-  std::mt19937_64 gen(0);
-  std::uniform_int_distribution<uint64_t> d(0ull, 0xffffffffffffffffull);
-  sideToPlayKeys[0] = d(gen);
-  sideToPlayKeys[1] = d(gen);
+  sideToPlayKeys[0] = xorshift64();
+  sideToPlayKeys[1] = xorshift64();
   for (int i = 0; i < 13; i++) {
     for (int j = 0; j < 64; j++) {
-      positionKeys[i][j] = d(gen);
+      positionKeys[i][j] = xorshift64();
     }
   }
   for (int i = 0; i < 16; i++) {
-    castlingPermissionsKeys[i] = d(gen);
+    castlingPermissionsKeys[i] = xorshift64();
   }
   for (int i = 0; i < 64; i++) {
-    enPassantSquareKeys[i] = d(gen);
+    enPassantSquareKeys[i] = xorshift64();
   }
 }
 uint64_t getKey(board& inputBoard) {
