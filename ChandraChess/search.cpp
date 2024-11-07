@@ -211,8 +211,8 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, std::vector<int>&
             }
             int piece = inputBoard.mailbox[from];
             inputBoard.history[piece][to] += increment - increment * inputBoard.history[piece][to] / 18311;
-            inputBoard.onePlyHistory[onePlyAgoPiece][onePlyAgoTo][piece][to] += increment - increment * inputBoard.onePlyHistory[onePlyAgoPiece][onePlyAgoTo][piece][to] / 18311;
-            inputBoard.twoPlyHistory[twoPlyAgoPiece][twoPlyAgoTo][piece][to] += increment - increment * inputBoard.twoPlyHistory[twoPlyAgoPiece][twoPlyAgoTo][piece][to] / 18311;
+            if (isOnePlyAgoValid) inputBoard.onePlyHistory[onePlyAgoPiece][onePlyAgoTo][piece][to] += increment - increment * inputBoard.onePlyHistory[onePlyAgoPiece][onePlyAgoTo][piece][to] / 18311;
+            if (isTwoPlyAgoValid) inputBoard.twoPlyHistory[twoPlyAgoPiece][twoPlyAgoTo][piece][to] += increment - increment * inputBoard.twoPlyHistory[twoPlyAgoPiece][twoPlyAgoTo][piece][to] / 18311;
             for (int k = 0; k < j; k++) {
               int move = moves.moveList[k].move;
               int from = move & 0x3f;
