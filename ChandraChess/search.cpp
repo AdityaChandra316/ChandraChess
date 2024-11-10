@@ -22,9 +22,10 @@ int boardSize = sizeof(board);
 int numberOfThreads = 1;
 int depthLimit = 64;
 int timeToSearch;
-int minimumTimeRemaining = 0;
+int minimumTimeRemaining = 200;
 volatile bool isInterruptedByGui;
 volatile bool isCurrentlySearching;
+bool hasBestMove;
 void loadTimeManagementTable() {
   std::ifstream input("./time_management_table.txt");
   std::string parameter;
@@ -38,7 +39,7 @@ void loadTimeManagementTable() {
 void checkUp(board& inputBoard) {
   std::chrono::steady_clock::time_point currentTime = std::chrono::steady_clock::now();
   int timeElapsed = (int)std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count();
-  if (timeElapsed > timeToSearch || isInterruptedByGui) inputBoard.isSearchStopped = true;
+  if (hasBestMove && (timeElapsed > timeToSearch || isInterruptedByGui)) inputBoard.isSearchStopped = true;
 }
 int quiescence(board& inputBoard, int alpha, int beta) {
   if ((inputBoard.nodes & 2047) == 0) checkUp(inputBoard);
@@ -73,9 +74,9 @@ int quiescence(board& inputBoard, int alpha, int beta) {
   return alpha;
 }
 // isSideToPlayInCheck is used in some search heuristics
-int negamax(board& inputBoard, int depth, int alpha, int beta, std::vector<int>& principalVariation, bool isSideToPlayInCheck) {
+int negamax(board& inputBoard, int depth, int alpha, int beta, principalVariationContainer& principalVariation, bool isSideToPlayInCheck) {
   if ((inputBoard.nodes & 2047) == 0) checkUp(inputBoard);
-  if (isSideToPlayInCheck) depth++;
+  if (isSideToPlayInCheck) depth++; // Extend search
   movesContainer moves;
   generateMoves(inputBoard, moves, false);
   if (isSideToPlayInCheck && moves.numberOfMoves == 0) return -20000 + inputBoard.distanceToRoot;
@@ -95,7 +96,8 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, std::vector<int>&
     if (staticEvaluation - evaluationMargin >= beta) return beta;
     futilityMargin = staticEvaluation + evaluationMargin;
   }
-  std::vector<int> currentPrincipalVariation;
+  principalVariationContainer currentPrincipalVariation;
+  currentPrincipalVariation.numberOfMoves = 0;
   int ourOffset = 6 * inputBoard.sideToPlay;
   if (!isPositionNoisy && depth >= 4 && (
     inputBoard.bitboards[12 + inputBoard.sideToPlay] ^ 
@@ -153,8 +155,8 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, std::vector<int>&
       makeMove(inputBoard, move);
       inputBoard.nodes++;
       int score;
-      currentPrincipalVariation.clear();
       if (j == 0) {
+        currentPrincipalVariation.numberOfMoves = 0;
         score = -negamax(inputBoard, depth - 1, -beta, -alpha, currentPrincipalVariation, isMoveResultingInCheck);
       } else {
         if (i == 0) startingSearch(inputBoard, depth);
@@ -163,11 +165,11 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, std::vector<int>&
         reduction = std::min(int(std::round(reduction)), std::max(depth - 2, 0));
         score = reduction == 0 ? alpha + 1 : -negamax(inputBoard, depth - 1 - reduction, -alpha - 1, -alpha, currentPrincipalVariation, isMoveResultingInCheck);
         if (score > alpha) {
-          currentPrincipalVariation.clear();
+          currentPrincipalVariation.numberOfMoves = 0;
           score = -negamax(inputBoard, depth - 1, -alpha - 1, -alpha, currentPrincipalVariation, isMoveResultingInCheck);
           if (i == 0) endingSearch(inputBoard, depth);
           if (score > alpha && score < beta) {
-            currentPrincipalVariation.clear();
+            currentPrincipalVariation.numberOfMoves = 0;
             score = -negamax(inputBoard, depth - 1, -beta, -alpha, currentPrincipalVariation, isMoveResultingInCheck);
           }
         } else if (i == 0) endingSearch(inputBoard, depth);
@@ -178,9 +180,9 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, std::vector<int>&
       if (inputBoard.isSearchStopped) return 0;
       // Update alpha.
       if (score > alpha) {
-        principalVariation.clear();
-        principalVariation.push_back(move);
-        for (int k = 0; k < currentPrincipalVariation.size(); k++) principalVariation.push_back(currentPrincipalVariation[k]);
+        principalVariation.numberOfMoves = 0;
+        principalVariation.moveList[principalVariation.numberOfMoves++] = move;
+        for (int k = 0; k < currentPrincipalVariation.numberOfMoves; k++) principalVariation.moveList[principalVariation.numberOfMoves++] = currentPrincipalVariation.moveList[k];
         bestMove = move;
         alpha = score;
         // Check failed high cutoff.
@@ -236,23 +238,26 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, std::vector<int>&
   return alpha;
 }
 void searchPosition(board& inputBoard) {
-  board* workerDatas = (board*)malloc(numberOfThreads * boardSize);
   int threadsToSpawn = numberOfThreads - 1;
+  board* workerDatas = (board*)malloc(threadsToSpawn * boardSize);
   for (int i = 0; i < threadsToSpawn; i++) workerDatas[i] = inputBoard;
-  std::vector<int> principalVariations[numberOfThreads];
-  std::vector<int> mainThreadPrincipalVariation;
-  std::vector<int> principalVariation;
+  std::vector<principalVariationContainer> principalVariations;
+  for (int i = 0; i < threadsToSpawn; i++) {
+    principalVariationContainer newPrincipalVariation;
+    principalVariations.push_back(newPrincipalVariation);
+  }
+  principalVariationContainer principalVariation;
   int currentDepth = 1;
   bool isSideToPlayInCheck = isSquareOfSideToPlayAttacked(inputBoard, msbPosition(inputBoard.bitboards[6 * inputBoard.sideToPlay]));
   while (true) {
-    std::thread workerThreads[threadsToSpawn];
+    std::vector<std::thread> workerThreads;
     for (int i = 0; i < threadsToSpawn; i++) {
-      std::vector<int>& currentPrincipalVariation = principalVariations[i];
-      currentPrincipalVariation.clear();
-      workerThreads[i] = std::thread(negamax, std::ref(workerDatas[i]), currentDepth, -20000, 20000, std::ref(currentPrincipalVariation), isSideToPlayInCheck);
+      principalVariationContainer& currentPrincipalVariation = principalVariations[i];
+      currentPrincipalVariation.numberOfMoves = 0;
+      workerThreads.push_back(std::thread(negamax, std::ref(workerDatas[i]), currentDepth, -20000, 20000, std::ref(currentPrincipalVariation), isSideToPlayInCheck));
     }
-    mainThreadPrincipalVariation.clear();
-    int score = negamax(inputBoard, currentDepth, -20000, 20000, mainThreadPrincipalVariation, isSideToPlayInCheck);
+    principalVariation.numberOfMoves = 0;
+    int score = negamax(inputBoard, currentDepth, -20000, 20000, principalVariation, isSideToPlayInCheck);
     // Stop all the threads once main thread has finished.
     for (int i = 0; i < threadsToSpawn; i++) {
       workerDatas[i].isSearchStopped = true;
@@ -264,7 +269,6 @@ void searchPosition(board& inputBoard) {
       isCurrentlySearching = true;
       break;
     }
-    principalVariation = mainThreadPrincipalVariation;
     std::chrono::steady_clock::time_point currentTime = std::chrono::steady_clock::now();
     int timeElapsed = (int)std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count();
     std::cout << "info depth " << currentDepth << " score ";
@@ -277,17 +281,18 @@ void searchPosition(board& inputBoard) {
       std::cout << "cp " << score << " "; 
     }
     int nodes = inputBoard.nodes;
-    for (int i = 0; i < numberOfThreads; i++) nodes += workerDatas[i].nodes;
+    for (int i = 0; i < threadsToSpawn; i++) nodes += workerDatas[i].nodes;
     int nodesPerSecond = (int)((double)nodes / ((double)timeElapsed / 1000.0));
     std::cout << "time " << timeElapsed << " nodes " << nodes << " nps " << nodesPerSecond << " pv ";
-    int principalVariationSizeMinusOne = principalVariation.size() - 1;
+    int principalVariationSizeMinusOne = principalVariation.numberOfMoves - 1;
     for (int i = 0; i <= principalVariationSizeMinusOne; i++) {
       std::string longAlgebraicMove;
-      moveToLongAlgebraic(principalVariation[i], longAlgebraicMove);
+      moveToLongAlgebraic(principalVariation.moveList[i], longAlgebraicMove);
       std::cout << longAlgebraicMove;
       if (i != principalVariationSizeMinusOne) std::cout << " ";
     }
     std::cout << std::endl;
+    hasBestMove = true;
     if (currentDepth == depthLimit) {
       isCurrentlySearching = false;
       break;
@@ -295,7 +300,7 @@ void searchPosition(board& inputBoard) {
     currentDepth++;
   }
   std::string longAlgebraicMove;
-  moveToLongAlgebraic(principalVariation[0], longAlgebraicMove);
+  moveToLongAlgebraic(principalVariation.moveList[0], longAlgebraicMove);
   std::cout << "bestmove " << longAlgebraicMove << std::endl;
   isCurrentlySearching = false;
 }
@@ -307,6 +312,7 @@ void prepareForSearch(board& inputBoard) {
   startTime = std::chrono::steady_clock::now();
   isInterruptedByGui = false;
   isCurrentlySearching = true;
+  hasBestMove = false;
   for (int i = 0; i < 64; i++) {
     for (int j = 0; j < 2; j++) {
       inputBoard.killersTable[i][j] = 0;
