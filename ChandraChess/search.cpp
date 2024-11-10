@@ -25,7 +25,7 @@ int timeToSearch;
 int minimumTimeRemaining = 200;
 volatile bool isInterruptedByGui;
 volatile bool isCurrentlySearching;
-bool hasBestMove;
+volatile bool hasBestMove;
 void loadTimeManagementTable() {
   std::ifstream input("./time_management_table.txt");
   std::string parameter;
