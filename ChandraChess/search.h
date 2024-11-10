@@ -8,6 +8,10 @@ extern int timeToSearch;
 extern int depthLimit;
 extern int minimumTimeRemaining;
 extern volatile bool isInterruptedByGui;
+struct principalVariationContainer {
+  int numberOfMoves = 0;
+  int moveList[64];
+};
 void loadTimeManagementTable();
 void searchPosition(board& inputBoard);
 void prepareForSearch(board& inputBoard);
