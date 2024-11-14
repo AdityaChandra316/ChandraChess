@@ -11,4 +11,4 @@ struct movesContainer {
   moveEntry moveList[256];
 };
 void generateMoves(board& inputBoard, movesContainer& moves, bool isQuiescentGenerator);
-void orderMoves(board& inputBoard, movesContainer& moves, int hashMove);
+void scoreMoves(board& inputBoard, movesContainer& moves, int hashMove);
