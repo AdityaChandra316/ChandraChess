@@ -39,12 +39,14 @@ void initializeMemory() {
 }
 int main() {
   std::cout << "Welcome to ChandraChess!" << std::endl;
+  numberOfThreads = 1;
   initializeMasks();
   initializeKeys();
   allocateTable(64000000);
   loadNnue();
   loadTimeManagementTable();
   initializeMemory();
+  setupThreadData();
   while (true) {
     std::string currentInput;
     std::getline(std::cin, currentInput);
@@ -99,7 +101,6 @@ int main() {
       depthLimit = 64;
       timeToSearch = 2147483647;
       int depthStart = currentInput.find("depth");
-      bool wasMoveTimeFound = false;
       int moveTimeStart = currentInput.find("movetime");
       int infiniteStart = currentInput.find("infinite");
       int perftStart = currentInput.find("perft");
@@ -174,16 +175,20 @@ int main() {
         allocateTable(hashSizeInMegabytes * 1000000);
       } else if (currentInput.substr(15, 7) == "Threads") {
         numberOfThreads = stoi(currentInput.substr(29, currentInputSize - 29));
+        setupThreadData();
       }
     } else if (currentInput == "ucinewgame") {
       initializeMemory();
     } else if (currentInput == "stop") {
       isInterruptedByGui = true;
+      while (isCurrentlySearching);
     } else if (currentInput == "quit") {
       isInterruptedByGui = true;
       while (isCurrentlySearching);
+      killAllThreads();
       return 0;
     } else if (currentInput == "isready") {
+      while (isCurrentlySearching);
       std::cout << "readyok" << std::endl;
     } else if (currentInput == "d") {
       printBoard(currentBoard);
