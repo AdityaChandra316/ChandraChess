@@ -12,6 +12,8 @@ struct principalVariationContainer {
   int numberOfMoves = 0;
   int moveList[64];
 };
+void killAllThreads();
+void setupThreadData();
 void loadTimeManagementTable();
 void searchPosition(board& inputBoard);
 void prepareForSearch(board& inputBoard);
