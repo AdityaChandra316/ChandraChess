@@ -20,11 +20,8 @@ bool isRayTypeValid[3][2] = {
 void saveMove(int from, int to, int promotionPiece, int type, movesContainer& moves) {
   moves.moveList[moves.numberOfMoves++].move = from | (to << 6) | (promotionPiece << 12) | (type << 14);
 }
-bool compareScoredMoves(moveEntry& firstScoredMove, moveEntry& secondScoredMove) {
-  return firstScoredMove.score > secondScoredMove.score;
-}
-// orderMoves() scores the moves based on various move ordering techniques.
-void orderMoves(board& inputBoard, movesContainer& moves, int hashMove) {
+// scoreMoves() scores the moves based on various move ordering techniques.
+void scoreMoves(board& inputBoard, movesContainer& moves, int hashMove) {
   // Get data about one and two ply ago move.
   int onePlyAgoPiece = 12;
   int onePlyAgoTo = 64;
@@ -75,11 +72,11 @@ void orderMoves(board& inputBoard, movesContainer& moves, int hashMove) {
           2 * (isOnePlyAgoValid ? inputBoard.onePlyHistory[onePlyAgoPiece][onePlyAgoTo][piece][to] : 0) +
           (isTwoPlyAgoValid ? inputBoard.twoPlyHistory[twoPlyAgoPiece][twoPlyAgoTo][piece][to] : 0)
         ) / 4;
+        // int historyScore = inputBoard.history[piece][to];
         currentMove.score = 19836 + historyScore;
       }
     }
   }
-  std::sort(moves.moveList, moves.moveList + moves.numberOfMoves, compareScoredMoves);
 }
 void generateMoves(board& inputBoard, movesContainer& moves, bool isQuiescentGenerator) {
   int ourOffset = 6 * inputBoard.sideToPlay;
