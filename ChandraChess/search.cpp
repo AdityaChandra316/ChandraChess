@@ -19,13 +19,24 @@
 double timeManagementTable[2][512];
 std::chrono::steady_clock::time_point startTime;
 int boardSize = sizeof(board);
-int numberOfThreads = 1;
+int intSize = sizeof(int);
+int boolSize = sizeof(bool);
+int principalVariationContainerSize = sizeof(principalVariationContainer);
+int numberOfThreads;
 int depthLimit = 64;
 int timeToSearch;
 int minimumTimeRemaining = 200;
 volatile bool isInterruptedByGui;
 volatile bool isCurrentlySearching;
 volatile bool hasBestMove;
+board* workerDatas;
+int* workerScores;
+bool volatile* workerIsRunning;
+principalVariationContainer* principalVariations;
+std::vector<std::thread> workerThreads;
+volatile bool killAllWorkers;
+int workerDepth;
+bool isWorkerSideToPlayInCheck;
 void loadTimeManagementTable() {
   std::ifstream input("./time_management_table.txt");
   std::string parameter;
@@ -49,8 +60,19 @@ int quiescence(board& inputBoard, int alpha, int beta) {
   if (alpha < standingPat) alpha = standingPat;
   movesContainer moves;
   generateMoves(inputBoard, moves, true);
-  orderMoves(inputBoard, moves, 0);
+  scoreMoves(inputBoard, moves, 0);
   for (int i = 0; i < moves.numberOfMoves; i++) {
+    int bestMoveScore = -1;
+    int bestMovePosition;
+    for (int k = i; k < moves.numberOfMoves; k++) {
+      moveEntry& currentMoveStructure = moves.moveList[k];
+      int currentMoveScore = currentMoveStructure.score;
+      if (currentMoveScore > bestMoveScore) {
+        bestMoveScore = currentMoveScore;
+        bestMovePosition = k;
+      }
+    } 
+    for (int k = bestMovePosition; k > i; k--) std::swap(moves.moveList[k], moves.moveList[k - 1]);
     moveEntry& moveStructure = moves.moveList[i];
     int move = moveStructure.move;
     int moveOrderingScore = moveStructure.score;
@@ -113,16 +135,26 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, principalVariatio
   }
   int bestMove = 0;
   int oldAlpha = alpha;
-  orderMoves(inputBoard, moves, hashMove);
-  std::vector<int> deferredMoveIndices;
+  scoreMoves(inputBoard, moves, hashMove);
+  bool deferredMovesMap[256] = {false};
   int depthSquared = depth * depth;
   int increment = std::min(32 * depthSquared, 18311); // For history heuristic
   int staticExchangeEvaluationLossMargin = -15 * depthSquared;
   for (int i = 0; i < 2; i++) {
     for (int j = 0; j < moves.numberOfMoves; j++) {
-      if (i == 1) {
-        bool isDeferringMove = std::binary_search(deferredMoveIndices.begin(), deferredMoveIndices.end(), j);
-        if (!isDeferringMove) continue;
+      if (i == 1 && !deferredMovesMap[j]) continue;
+      if (i == 0) {
+        int bestMoveScore = -1;
+        int bestMovePosition;
+        for (int k = j; k < moves.numberOfMoves; k++) {
+          moveEntry& currentMoveStructure = moves.moveList[k];
+          int currentMoveScore = currentMoveStructure.score;
+          if (currentMoveScore > bestMoveScore) {
+            bestMoveScore = currentMoveScore;
+            bestMovePosition = k;
+          }
+        } 
+        for (int k = bestMovePosition; k > j; k--) std::swap(moves.moveList[k], moves.moveList[k - 1]);
       }
       moveEntry& moveStructure = moves.moveList[j];
       int move = moveStructure.move;
@@ -133,7 +165,7 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, principalVariatio
       makeHashKeyMove(inputBoard, move);
       bool isDeferredBySyncronisation = i == 0 && j != 0 && depth >= 3 && syncronisationTable[inputBoard.currentKey & 131071] == inputBoard.currentKey;
       if (isDeferredBySyncronisation) {
-        deferredMoveIndices.push_back(j);
+        deferredMovesMap[j] = true;
         takeHashKeyMove(inputBoard);
         continue;
       }
@@ -237,41 +269,64 @@ int negamax(board& inputBoard, int depth, int alpha, int beta, principalVariatio
   insertToTable(inputBoard, bestMove, depth, alpha, oldAlpha == alpha ? upperBound : exact);
   return alpha;
 }
-void searchPosition(board& inputBoard) {
-  int threadsToSpawn = numberOfThreads - 1;
-  board* workerDatas = (board*)malloc(threadsToSpawn * boardSize);
-  for (int i = 0; i < threadsToSpawn; i++) workerDatas[i] = inputBoard;
-  std::vector<principalVariationContainer> principalVariations;
-  for (int i = 0; i < threadsToSpawn; i++) {
-    principalVariationContainer newPrincipalVariation;
-    principalVariations.push_back(newPrincipalVariation);
-  }
-  principalVariationContainer principalVariation;
-  int currentDepth = 1;
-  bool isSideToPlayInCheck = isSquareOfSideToPlayAttacked(inputBoard, msbPosition(inputBoard.bitboards[6 * inputBoard.sideToPlay]));
+void workerThread(int thread) {
   while (true) {
-    std::vector<std::thread> workerThreads;
-    for (int i = 0; i < threadsToSpawn; i++) {
-      principalVariationContainer& currentPrincipalVariation = principalVariations[i];
-      currentPrincipalVariation.numberOfMoves = 0;
-      workerThreads.push_back(std::thread(negamax, std::ref(workerDatas[i]), currentDepth, -20000, 20000, std::ref(currentPrincipalVariation), isSideToPlayInCheck));
+    if (killAllWorkers) return;
+    if (!workerIsRunning[thread]) continue;
+    workerScores[thread] = negamax(workerDatas[thread], workerDepth, -20000, 20000, principalVariations[thread], isWorkerSideToPlayInCheck);
+    workerIsRunning[thread] = false;
+  }
+}
+void killAllThreads() {
+  killAllWorkers = true;
+  for (int i = 0; i < workerThreads.size(); i++) if (workerThreads[i].joinable()) workerThreads[i].join();
+}
+void setupThreadData() {
+  workerDatas = (board*)calloc(numberOfThreads, boardSize);
+  workerScores = (int*)calloc(numberOfThreads, intSize);
+  workerIsRunning = (bool*)calloc(numberOfThreads, boolSize);
+  principalVariations = (principalVariationContainer*)calloc(numberOfThreads, principalVariationContainerSize);
+  killAllThreads();
+  killAllWorkers = false;
+  workerThreads.clear();
+  for (int i = 0; i < numberOfThreads; i++) workerThreads.push_back(std::thread(workerThread, i));
+}
+void searchPosition(board& inputBoard) {
+  for (int i = 0; i < numberOfThreads; i++) workerDatas[i] = inputBoard;
+  principalVariationContainer currentPrincipalVariation;
+  int currentDepth = 1;
+  isWorkerSideToPlayInCheck = isSquareOfSideToPlayAttacked(inputBoard, msbPosition(inputBoard.bitboards[6 * inputBoard.sideToPlay]));
+  while (true) {
+    workerDepth = currentDepth;
+    for (int i = 0; i < numberOfThreads; i++) principalVariations[i].numberOfMoves = 0;
+    for (int i = 0; i < numberOfThreads; i++) workerIsRunning[i] = true;
+    // Wait until first thread finishes
+    int selectedThread;
+    while (true) {
+      bool hasFirstThreadFinished = false;
+      for (int i = 0; i < numberOfThreads; i++) {
+        if (!workerIsRunning[i]) {
+          hasFirstThreadFinished = true;
+          selectedThread = i;
+          break;
+        }
+      }
+      if (hasFirstThreadFinished) break;
     }
-    principalVariation.numberOfMoves = 0;
-    int score = negamax(inputBoard, currentDepth, -20000, 20000, principalVariation, isSideToPlayInCheck);
-    // Stop all the threads once main thread has finished.
-    for (int i = 0; i < threadsToSpawn; i++) {
-      workerDatas[i].isSearchStopped = true;
-      if (workerThreads[i].joinable()) workerThreads[i].join();
+    // Stop all the threads
+    for (int i = 0; i < numberOfThreads; i++) if (i != selectedThread) workerDatas[i].isSearchStopped = true;
+    while (true) {
+      bool haveAllThreadsFinished = true;
+      for (int i = 0; i < numberOfThreads; i++) if (workerIsRunning[i]) haveAllThreadsFinished = false;
+      if (haveAllThreadsFinished) break;
     }
     // Set the threads as unstopped once they actually have stopped so that we can search again.
-    for (int i = 0; i < threadsToSpawn; i++) workerDatas[i].isSearchStopped = false;
-    if (inputBoard.isSearchStopped) {
-      isCurrentlySearching = true;
-      break;
-    }
+    for (int i = 0; i < numberOfThreads; i++) if (i != selectedThread) workerDatas[i].isSearchStopped = false;
+    if (workerDatas[selectedThread].isSearchStopped) break;
     std::chrono::steady_clock::time_point currentTime = std::chrono::steady_clock::now();
     int timeElapsed = (int)std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count();
     std::cout << "info depth " << currentDepth << " score ";
+    int score = workerScores[selectedThread];
     std::string displayedScore = std::to_string(score);
     if (std::abs(score) >= 19936) {
       int mateIn = ceil((20000.0 - (double)std::abs(score)) / 2.0);
@@ -280,27 +335,25 @@ void searchPosition(board& inputBoard) {
     } else {
       std::cout << "cp " << score << " "; 
     }
-    int nodes = inputBoard.nodes;
-    for (int i = 0; i < threadsToSpawn; i++) nodes += workerDatas[i].nodes;
+    int nodes = 0;
+    for (int i = 0; i < numberOfThreads; i++) nodes += workerDatas[i].nodes;
     int nodesPerSecond = (int)((double)nodes / ((double)timeElapsed / 1000.0));
     std::cout << "time " << timeElapsed << " nodes " << nodes << " nps " << nodesPerSecond << " pv ";
-    int principalVariationSizeMinusOne = principalVariation.numberOfMoves - 1;
+    currentPrincipalVariation = principalVariations[selectedThread];
+    int principalVariationSizeMinusOne = currentPrincipalVariation.numberOfMoves - 1;
     for (int i = 0; i <= principalVariationSizeMinusOne; i++) {
       std::string longAlgebraicMove;
-      moveToLongAlgebraic(principalVariation.moveList[i], longAlgebraicMove);
+      moveToLongAlgebraic(currentPrincipalVariation.moveList[i], longAlgebraicMove);
       std::cout << longAlgebraicMove;
       if (i != principalVariationSizeMinusOne) std::cout << " ";
     }
     std::cout << std::endl;
     hasBestMove = true;
-    if (currentDepth == depthLimit) {
-      isCurrentlySearching = false;
-      break;
-    }
+    if (currentDepth == depthLimit) break;
     currentDepth++;
   }
   std::string longAlgebraicMove;
-  moveToLongAlgebraic(principalVariation.moveList[0], longAlgebraicMove);
+  moveToLongAlgebraic(currentPrincipalVariation.moveList[0], longAlgebraicMove);
   std::cout << "bestmove " << longAlgebraicMove << std::endl;
   isCurrentlySearching = false;
 }
