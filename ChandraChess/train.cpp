@@ -295,7 +295,7 @@ class NNUE {
       double outputDistributionRange = 1.0 / std::sqrt(2.0 * ACCUMULATOR_SIZE);
       std::random_device rd; 
       std::mt19937 gen(rd());
-      std::uniform_real_distribution<double> featureTransformerDistribution(0.0, std::sqrt(2.0 / 768.0)); 
+      std::normal_distribution<double> featureTransformerDistribution(0.0, std::sqrt(2.0 / 32.0)); 
       std::uniform_real_distribution<double> outputDistribution(-outputDistributionRange, outputDistributionRange); 
       for (int i = 0; i < numberOfFeatureTransformerWeights; i++) {
         featureTransformerWeightsWhite[i] = featureTransformerDistribution(gen);
